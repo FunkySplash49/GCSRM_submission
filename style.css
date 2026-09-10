@@ -1,0 +1,149 @@
+/* dead center -- the cabinet around a 128x128 screen. */
+
+:root {
+  --ink: #fff1e8;          /* pico-8 7  */
+  --dim: #5f574f;          /* pico-8 5  */
+  --deep: #1d2b53;         /* pico-8 1  */
+  --hot: #ff004d;          /* pico-8 8  */
+  --bg: #05050a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  min-height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  -webkit-font-smoothing: antialiased;
+  overscroll-behavior: none;
+}
+
+body {
+  display: grid;
+  place-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px max(16px, env(safe-area-inset-bottom));
+  background: var(--bg);
+}
+
+.cab {
+  width: min(100%, 46rem);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: .42em;
+  text-transform: uppercase;
+  color: var(--dim);
+  text-indent: .42em;              /* balance the trailing letter-space */
+}
+
+/* ---- the screen -------------------------------------------------------- */
+
+.bezel {
+  position: relative;
+  padding: 10px;
+  border-radius: 14px;
+  background: #0f0e15;
+  box-shadow:
+    inset 0 1px 0 #2b2740,
+    inset 0 -1px 0 #000,
+    0 18px 40px -20px rgba(0, 0, 0, .9);
+}
+
+#screen {
+  display: block;
+  /* One canvas pixel is an integer number of device pixels wherever possible. */
+  width: min(78vmin, 512px);
+  height: min(78vmin, 512px);
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  background: #000;
+  border-radius: 3px;
+  touch-action: none;
+  cursor: crosshair;
+}
+
+/* A whisper of CRT -- enough to sell the screen, not enough to fight it. */
+.scanlines {
+  position: absolute;
+  inset: 10px;
+  border-radius: 3px;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, .16) 0 1px,
+    rgba(0, 0, 0, 0) 1px 3px
+  );
+  mix-blend-mode: multiply;
+  opacity: .55;
+}
+
+@media (prefers-reduced-motion: reduce) { .scanlines { display: none; } }
+
+/* ---- chrome ------------------------------------------------------------ */
+
+.bar {
+  width: min(78vmin, 512px);
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;   /* hint stays centred on the screen */
+  align-items: center;
+  gap: 12px;
+}
+.bar #hint { grid-column: 2; justify-self: center; }
+.bar #mute { grid-column: 3; justify-self: end; }
+
+#hint {
+  display: block;
+  height: auto;
+  max-width: 100%;
+  image-rendering: pixelated;
+  opacity: .85;
+}
+
+#mute {
+  flex: none;
+  white-space: nowrap;
+  padding: 5px 10px;
+  font: inherit;
+  font-size: 11px;
+  color: var(--dim);
+  background: #0d0b14;
+  border: 1px solid #211d30;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color .15s, border-color .15s;
+}
+#mute:hover { color: var(--ink); border-color: #3a3352; }
+#mute[aria-pressed="true"] { color: #3a3352; }
+
+.notes {
+  width: min(78vmin, 512px);
+  font-size: 11.5px;
+  color: var(--dim);
+}
+.notes summary {
+  cursor: pointer;
+  color: #83769c;
+  list-style: none;
+}
+.notes summary::-webkit-details-marker { display: none; }
+.notes summary::before { content: "+ "; color: var(--hot); }
+.notes[open] summary::before { content: "− "; }
+.notes p { margin: 10px 0 0; max-width: 60ch; }
+.notes em { color: var(--hot); font-style: normal; }
+.notes code { color: #83769c; }
+.prov { color: #3a3352; }
+
+@media (max-width: 420px) {
+  #screen, .bar, .notes { width: min(92vmin, 420px); }
+  #screen { height: min(92vmin, 420px); }
+  .scanlines { inset: 10px; }
+}

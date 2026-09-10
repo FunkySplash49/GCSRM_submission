@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>dead center</title>
+<meta name="description" content="A tiny arcade game in a 128x128 box. Your ship fires on its own, always at the middle.">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Crect width=%2732%27 height=%2732%27 fill=%27%23000%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%2712%27 fill=%27none%27 stroke=%27%23fff1e8%27 stroke-width=%272%27/%3E%3Ccircle cx=%2716%27 cy=%2716%27 r=%273%27 fill=%27%23ff004d%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <main class="cab">
+    <h1 class="title">dead center</h1>
+
+    <div class="bezel">
+      <canvas id="screen" width="128" height="128" aria-label="dead center game screen"></canvas>
+      <div class="scanlines" aria-hidden="true"></div>
+    </div>
+
+    <div class="bar">
+      <canvas id="hint" aria-label="arrows or wasd to move, z to start, m to mute"></canvas>
+      <button id="mute" type="button" aria-pressed="false">sound on</button>
+    </div>
+
+    <details class="notes">
+      <summary>how it works</summary>
+      <p>
+        Your ship fires on its own, always straight at the middle. Shots that miss
+        ricochet off the wall and come back <em>charged</em> — red, worth double, and
+        now lethal to you. Red rings kill on contact. The wall remembers every
+        impact as a ripple.
+      </p>
+      <p class="prov">
+        128&times;128 pixels, drawn one at a time. No engine, no build step, no
+        dependencies &mdash; open the file and it runs.
+      </p>
+    </details>
+  </main>
+
+  <script src="src/p8.js"></script>
+  <script src="src/game.js"></script>
+  <script>
+  /* The controls legend, set in the game's own 3x5 font so the page and the
+     screen speak with one voice. Drawn straight from P8.FONT -- no webfont, no
+     extra request, still works off file://. */
+  (function () {
+    var coarse = window.matchMedia('(hover: none) and (pointer: coarse)').matches;
+    var text = coarse ? 'drag to move   tap to start'
+                      : 'arrows/wasd move   z start   m mute';
+    var S = 2;                                   // pixel size
+    var cv = document.getElementById('hint');
+    var w = (text.length * 4 - 1) * S, h = 5 * S;
+    cv.width = w; cv.height = h;
+    cv.style.width = w + 'px';
+    var ctx = cv.getContext('2d');
+    ctx.fillStyle = '#6f6f79';
+    for (var i = 0; i < text.length; i++) {
+      var g = P8.FONT[text[i]];
+      if (!g) continue;
+      for (var row = 0; row < 5; row++)
+        for (var col = 0; col < 3; col++)
+          if (g[row] & (4 >> col)) ctx.fillRect((i * 4 + col) * S, row * S, S, S);
+    }
+  })();
+  </script>
+</body>
+</html>
