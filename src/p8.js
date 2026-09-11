@@ -15,7 +15,10 @@
     [0x00, 0x00, 0x00], [0x1d, 0x2b, 0x53], [0x7e, 0x25, 0x53], [0x00, 0x87, 0x51],
     [0xab, 0x52, 0x36], [0x5f, 0x57, 0x4f], [0xc2, 0xc3, 0xc7], [0xff, 0xf1, 0xe8],
     [0xff, 0x00, 0x4d], [0xff, 0xa3, 0x00], [0xff, 0xec, 0x27], [0x00, 0xe4, 0x36],
-    [0x29, 0xad, 0xff], [0x83, 0x76, 0x9c], [0xff, 0x77, 0xa8], [0xff, 0xcc, 0xaa]
+    [0x29, 0xad, 0xff], [0x83, 0x76, 0x9c], [0xff, 0x77, 0xa8], [0xff, 0xcc, 0xaa],
+    // Two past the standard sixteen, for the HUD only.
+    [0x9b, 0x1b, 0x30],   // 16  velvet red  -- lives
+    [0xff, 0xd7, 0x00]    // 17  bright gold -- cash
   ];
 
   // ------------------------------------------------------------------- font
@@ -25,7 +28,7 @@
   // exactly what makes small pixel text readable at this size.
   var FONT = {
     ' ': [0, 0, 0, 0, 0], '!': [2, 2, 2, 0, 2], '"': [5, 5, 0, 0, 0], '#': [5, 7, 5, 7, 5],
-    '%': [5, 1, 2, 4, 5], '&': [6, 6, 3, 5, 7], "'": [2, 4, 0, 0, 0], '(': [2, 4, 4, 4, 2],
+    '$': [7, 6, 3, 7, 2], '%': [5, 1, 2, 4, 5], '&': [6, 6, 3, 5, 7], "'": [2, 4, 0, 0, 0], '(': [2, 4, 4, 4, 2],
     ')': [2, 1, 1, 1, 2], '*': [5, 2, 7, 2, 5], '+': [0, 2, 7, 2, 0], ',': [0, 0, 0, 2, 4],
     '-': [0, 0, 7, 0, 0], '.': [0, 0, 0, 0, 2], '/': [1, 2, 2, 2, 4],
     '0': [7, 5, 5, 5, 7], '1': [6, 2, 2, 2, 7], '2': [7, 1, 7, 4, 7], '3': [7, 1, 3, 1, 7],
@@ -140,6 +143,17 @@
     }
   }
 
+  function rectfill(x0, y0, x1, y1, c) {
+    y0 = flr(y0); y1 = flr(y1);
+    for (var y = y0; y <= y1; y++) hspan(x0, x1, y, c);
+  }
+
+  function rect(x0, y0, x1, y1, c) {
+    hspan(x0, x1, y0, c);
+    hspan(x0, x1, y1, c);
+    for (var y = flr(y0); y <= flr(y1); y++) { pset(x0, y, c); pset(x1, y, c); }
+  }
+
   // print() with two inline control codes: \6w doubles the width of everything
   // after it and \6t doubles the height. The score uses both.
   function print(str, x, y, c) {
@@ -207,8 +221,8 @@
     var ctx = canvas.getContext('2d', { alpha: false });
     var img = ctx.createImageData(W, H);
     var px = new Uint32Array(img.data.buffer);
-    var lut = new Uint32Array(16);
-    for (var i = 0; i < 16; i++) {
+    var lut = new Uint32Array(PALETTE.length);
+    for (var i = 0; i < PALETTE.length; i++) {
       var p = PALETTE[i];
       lut[i] = (255 << 24) | (p[2] << 16) | (p[1] << 8) | p[0];   // little-endian RGBA
     }
@@ -374,7 +388,7 @@
   global.P8 = {
     W: W, H: H, fb: fb, PALETTE: PALETTE, FONT: FONT,
     cls: cls, camera: camera, line: line, circ: circ, circfill: circfill,
-    print: print, pset: pset,
+    rect: rect, rectfill: rectfill, print: print, pset: pset,
     cos: p8cos, sin: p8sin, atan2: p8atan2, rnd: rnd, flr: flr,
     each: each, all: all, del: del,
     Screen: Screen, Audio: Audio, renderSfx: renderSfx, parseSfx: parseSfx

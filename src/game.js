@@ -28,7 +28,8 @@
     kill200: 's3>>x5cgc4c1c0',   // charged kill
     kill100: 's3>>x5g2dc1c0',    // plain kill
     fire:    's1<<x5f4c4',       // you fire
-    start:   's3>>x5c2gc3'       // new game
+    start:   's3>>x5c2gc3',      // new game
+    coin:    's2<<x5c5'          // one unit of cash crossing into the wallet
   };
   var audio = P.Audio();
   function sfx(s) { audio.play(s); }
@@ -37,6 +38,40 @@
   var player, cores, orbs, fx;
   var shake, score, wave, waveTimer, toSpawn, fireInterval, spawnTimer, fireTimer;
   var playing = false;
+
+  var LIVES = 3;
+  var lives;          // squares still filled, bottom left
+  var invuln;         // frames of grace after a hit, or you'd lose all three at once
+  var hurtFlash;      // frames the square you just lost keeps blinking
+  var cash;           // this run's earnings, score / 100
+  var highScore = 0, bank = 0;   // bank is the wallet: every run ever, added up
+
+  // The end card's life, in order: slide in and settle, wait for a button, pay
+  // the run's cash into the wallet, then launch back out the way it came.
+  var PH_IN = 0, PH_WAIT = 1, PH_CASHOUT = 2, PH_OUT = 3;
+  var END_K = 0.16, END_DAMP = 0.68, END_START = -90;
+  var END_KICK = -2.4, END_GRAV = 0.6;   // the wind-up, then the slingshot
+  var ending, endPhase, panelY, panelVy, panelW;
+  var cashAcc, cashStep;
+
+  // Mouse, kept in game coordinates. Only the end card cares.
+  var mouseX = 0, mouseY = 0, mouseIn = false, clickWanted = false;
+  var hoverBtn = -1;
+
+  // High score and the cash bank outlive the tab. Wrapped because private
+  // browsing throws on the first read rather than returning null.
+  function load() {
+    try {
+      highScore = +localStorage.getItem('dc.hi') || 0;
+      bank = +localStorage.getItem('dc.bank') || 0;
+    } catch (e) { /* no storage, no problem */ }
+  }
+  function save() {
+    try {
+      localStorage.setItem('dc.hi', highScore);
+      localStorage.setItem('dc.bank', bank);
+    } catch (e) { /* ditto */ }
+  }
 
   // ------------------------------------------------------------------ helpers
 
@@ -96,14 +131,97 @@
     score = 0;
     fx = [];
     shake = 0;
+    lives = LIVES;
+    invuln = 0;
+    hurtFlash = 0;
+    cash = 0;
+    ending = false;
   }
 
   //
-  function die() {
+  // Take a hit. Costs one square; the run only ends when the last one goes.
+  function hit() {
+    if (invuln > 0) return;
     add(fx, { x: player.x, y: player.y, life: 2 });
     shake += 6;
-    playing = false;
     sfx(SFX.die);
+    lives -= 1;
+    hurtFlash = 30;
+    invuln = 90;
+    if (lives <= 0) gameOver();
+  }
+
+  // The run's cash deliberately does not reach the wallet here. It sits on the
+  // card until you hit play again, so you get to watch it move.
+  function gameOver() {
+    playing = false;
+    if (score > highScore) highScore = score;
+    save();
+    ending = true;
+    endPhase = PH_IN;
+    panelY = END_START;
+    panelVy = 0;
+    panelW = cardWidth();
+  }
+
+  function startGame() {
+    playing = true;
+    reset();
+    add(fx, { x: player.x, y: player.y, life: 2 });
+    shake += 3;
+    sfx(SFX.start);
+  }
+
+  // Pay out over roughly half a second however big the haul, with a floor so a
+  // three-coin run is still long enough to read.
+  function startCashout() {
+    endPhase = PH_CASHOUT;
+    cashAcc = 0;
+    cashStep = max(0.34, cash / 30);
+    if (cash <= 0) launchCard();
+  }
+
+  function launchCard() {
+    save();
+    endPhase = PH_OUT;
+    panelVy = END_KICK;
+  }
+
+  // One frame of the end card, whichever part of its life it's in.
+  function stepEnd() {
+    if (endPhase === PH_IN) {
+      // Spring, not a tween: the card carries its momentum past the middle and
+      // has to come back up for it.
+      panelVy += (0 - panelY) * END_K;
+      panelVy *= END_DAMP;
+      panelY += panelVy;
+      if (abs(panelY) < 0.5 && abs(panelVy) < 0.5) { panelY = 0; endPhase = PH_WAIT; }
+
+    } else if (endPhase === PH_WAIT) {
+      hoverBtn = mouseIn ? hitButton(mouseX, mouseY) : -1;
+      // Button 1 is the shop. It lights up and does nothing, for now.
+      if (btnp(4) || (clickWanted && hoverBtn === 0)) startCashout();
+
+    } else if (endPhase === PH_CASHOUT) {
+      // Drain the card into the wallet a coin at a time. Both counters stay
+      // whole numbers; only the rate is fractional.
+      cashAcc += cashStep;
+      while (cashAcc >= 1 && cash > 0) {
+        cashAcc -= 1;
+        cash -= 1;
+        bank += 1;
+        if (cash % 2 === 0) sfx(SFX.coin);
+      }
+      if (cash <= 0) launchCard();
+
+    } else {
+      panelVy += END_GRAV;
+      panelY += panelVy;
+      if (panelY > 110) { ending = false; startGame(); }
+    }
+
+    if (endPhase !== PH_WAIT || !ending) hoverBtn = -1;
+    setCursor(hoverBtn >= 0);
   }
 
   // ------------------------------------------------------------------- input
@@ -121,6 +239,15 @@
   function press(bit) { btnState |= 1 << bit; btnHit |= 1 << bit; }
   function release(bit) { btnState &= ~(1 << bit); }
 
+  // The canvas is one element, so a hand cursor is the only way to tell you
+  // that part of it is a button. Only touched when it actually changes.
+  var canvasEl = null, cursorOn = false;
+  function setCursor(on) {
+    if (on === cursorOn || !canvasEl) return;
+    cursorOn = on;
+    canvasEl.style.cursor = on ? 'pointer' : '';
+  }
+
   // --------------------------------------------------------------- game step
   // One step: simulate, then draw. Called exactly 60 times a second.
   function step() {
@@ -131,6 +258,10 @@
       if (e.life === 0) del(fx, e);
     });
     shake -= min(0.125, shake);
+    if (invuln > 0) invuln -= 1;
+    if (hurtFlash > 0) hurtFlash -= 1;
+
+    if (ending) stepEnd();
 
     if (playing) {
       // ---- movement: 1px/frame in one of eight directions
@@ -152,16 +283,16 @@
         c.x += c.vx;
         c.y += c.vy;
         wall(c, 3);
-        if (dist2(c, player) < 32) die();
+        if (dist2(c, player) < 32) hit();
       });
 
       // ---- orbs
       each(orbs, function (o) {
         o.x += o.vx;
         o.y += o.vy;
-        var hit = wall(o, 1);
-        if (hit !== null) {
-          add(fx, { angle: hit, life: 120 });        // ripple in the wall
+        var bounce = wall(o, 1);
+        if (bounce !== null) {
+          add(fx, { angle: bounce, life: 120 });     // ripple in the wall
           shake += 0.5;
           if (o.charged) {
             sfx(SFX.burnout);
@@ -171,7 +302,7 @@
             o.charged = true;
           }
         } else if (o.charged && dist2(o, player) < 32) {
-          die();
+          hit();
           del(orbs, o);
         } else {
           for (var i = 0; i < cores.length; i++) {
@@ -183,6 +314,7 @@
               if (o.charged) { points = 200; sfx(SFX.kill200); }
               else sfx(SFX.kill100);
               score += points;
+              cash = Math.floor(score / 100);
               add(fx, { x: c.x, y: c.y, life: 2 });
               shake += 3;
               add(fx, { x: c.x, y: c.y - 4, points: points, life: 40 });
@@ -210,14 +342,11 @@
 
     draw();
 
-    if (!playing && btnp(4)) {
-      playing = true;
-      reset();
-      add(fx, { x: player.x, y: player.y, life: 2 });
-      shake += 3;
-      sfx(SFX.start);
-    }
+    // The very first game still starts on a keypress; after that the card's
+    // own button takes over, and stepEnd() handles it.
+    if (!playing && !ending && btnp(4)) startGame();
     btnHit = 0;
+    clickWanted = false;
   }
 
   // ------------------------------------------------------------------- draw
@@ -227,10 +356,16 @@
     P.camera(rnd(shake) - rnd(shake) - 64, rnd(shake) - rnd(shake) - 64);
     P.cls();
 
-    var s = '' + score;
-    P.print('\x06w\x06t' + s, -s.length * 4, -5, 1);
+    // The big number behind everything. It's hidden once the end card is on
+    // its way in, otherwise it pokes out over the top edge mid-slide.
+    if (!ending) {
+      var s = '' + score;
+      P.print('\x06w\x06t' + s, -s.length * 4, -5, 1);
+    }
 
-    if (playing) {                                  // the ship: a triangle
+    // The ship, a triangle aimed at the middle. It strobes while the grace
+    // period after a hit is running, so you can see the window closing.
+    if (playing && !(invuln > 0 && flr(invuln / 4) % 2)) {
       P.line();
       var a = atan2(-player.x, -player.y);
       var pts = [0, 0.375, -0.375, 0];
@@ -264,12 +399,99 @@
       if (e.points) P.print('+' + e.points, -8 + e.x, e.y, flr(e.points / 32) + 4);
       else if (e.y !== undefined) P.circfill(e.x, e.y, 5, 7);
     }
+
+    drawLives();
+    drawWallet();
+    if (ending) drawEndCard();
+  }
+
+  // Three squares in the bottom-left corner, outside the wall. A square you
+  // still have is solid; one you've lost keeps its outline. The one you just
+  // lost blinks for half a second on its way out.
+  var VELVET = 16, GOLD = 17, GREY = 13, RED = 8;
+  function drawLives() {
+    for (var i = 0; i < LIVES; i++) {
+      var x = -60 + i * 8, y = 54;
+      var solid = i < lives;
+      if (!solid && i === lives && hurtFlash > 0 && flr(hurtFlash / 4) % 2) solid = true;
+      if (solid) P.rectfill(x, y, x + 4, y + 4, VELVET);
+      else P.rect(x, y, x + 4, y + 4, VELVET);
+    }
+  }
+
+  // The wallet, top right, always on screen. Dimmed while you play, gold once
+  // the run is over and the card starts feeding it. Spelled out rather than
+  // "$3" because at 3x5 the dollar glyph is a dead ringer for a 5.
+  function drawWallet() {
+    var s = 'cash: ' + bank;
+    P.print(s, 61 - s.length * 4, -60, ending ? GOLD : GREY);
+  }
+
+  // ---------------------------------------------------------- the end card
+  // Three lines of results, two buttons under them, the lot centred on panelY
+  // so the buttons ride along with the card through every animation.
+  var CARD_H = 34, BTN_H = 11, BTN_GAP = 4, CARD_GAP = 4;
+  var BTN_LABELS = ['play again', 'shop'];
+
+  function textW(s) { return s.length * 4 - 1; }
+  function endLines() {
+    return ['score: ' + score, 'high score: ' + highScore, 'earned: ' + cash];
+  }
+
+  // Measured once, when the card is built. Left to recompute every frame it
+  // would shrink under the cashout counter and jitter.
+  function cardWidth() {
+    var lines = endLines(), w = 0;
+    for (var i = 0; i < lines.length; i++) w = max(w, textW(lines[i]));
+    return w + 12;
+  }
+
+  function endLayout() {
+    var w = panelW;
+    var bw = [textW(BTN_LABELS[0]) + 9, textW(BTN_LABELS[1]) + 9];
+    var rowW = bw[0] + BTN_GAP + bw[1];
+    var top = flr(panelY) - flr((CARD_H + CARD_GAP + BTN_H) / 2);
+
+    var lay = { x: -flr(w / 2), y: top, w: w, btns: [] };
+    var bx = -flr(rowW / 2), by = top + CARD_H + CARD_GAP;
+    for (var i = 0; i < 2; i++) {
+      lay.btns.push({ label: BTN_LABELS[i], x: bx, y: by, w: bw[i] });
+      bx += bw[i] + BTN_GAP;
+    }
+    return lay;
+  }
+
+  function hitButton(gx, gy) {
+    var btns = endLayout().btns;
+    for (var i = 0; i < btns.length; i++) {
+      var b = btns[i];
+      if (gx >= b.x && gx <= b.x + b.w && gy >= b.y && gy <= b.y + BTN_H) return i;
+    }
+    return -1;
+  }
+
+  function drawEndCard() {
+    var lay = endLayout(), lines = endLines();
+    P.rectfill(lay.x, lay.y, lay.x + lay.w, lay.y + CARD_H, 0);
+    P.rect(lay.x, lay.y, lay.x + lay.w, lay.y + CARD_H, 7);
+    for (var i = 0; i < lines.length; i++)
+      P.print(lines[i], lay.x + 6, lay.y + 7 + i * 8, 7);
+
+    // Grey until the pointer is on one, then the game's own red.
+    for (var i = 0; i < lay.btns.length; i++) {
+      var b = lay.btns[i], c = i === hoverBtn ? RED : GREY;
+      P.rectfill(b.x, b.y, b.x + b.w, b.y + BTN_H, 0);
+      P.rect(b.x, b.y, b.x + b.w, b.y + BTN_H, c);
+      P.print(b.label, b.x + flr((b.w + 1 - textW(b.label)) / 2), b.y + 3, c);
+    }
   }
 
   // --------------------------------------------------------------- the shell
   function boot() {
     var canvas = document.getElementById('screen');
     var screen = P.Screen(canvas);
+    canvasEl = canvas;
+    load();
     reset();
     playing = false;
 
@@ -324,6 +546,23 @@
     }
     canvas.addEventListener('touchend', endTouch, { passive: false });
     canvas.addEventListener('touchcancel', endTouch, { passive: false });
+
+    // ---- mouse, for the end card's buttons. Page pixels come back as game
+    // coordinates, -64..63, so the hit test works in the numbers the card is
+    // drawn with, whatever size the canvas has been stretched to.
+    function toGame(ev) {
+      var r = canvas.getBoundingClientRect();
+      mouseX = (ev.clientX - r.left) / r.width * 128 - 64;
+      mouseY = (ev.clientY - r.top) / r.height * 128 - 64;
+      mouseIn = true;
+    }
+    canvas.addEventListener('mousemove', toGame);
+    canvas.addEventListener('mouseleave', function () { mouseIn = false; });
+    canvas.addEventListener('click', function (ev) {
+      toGame(ev);
+      clickWanted = true;
+      audio.unlock();
+    });
 
     // ---- mute button
     var muteBtn = document.getElementById('mute');
