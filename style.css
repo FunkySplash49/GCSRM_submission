@@ -174,8 +174,26 @@ body {
 .notes code { color: #83769c; }
 .prov { color: #3a3352; }
 
+/* Profile on the left, repo then linkedin on the right, on the same width as
+   everything else in the cabinet. */
+.links {
+  width: min(78vmin, 512px);
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  font-size: 11.5px;
+}
+.links span { display: flex; gap: 14px; }
+.links a {
+  color: var(--dim);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: color .15s, border-color .15s;
+}
+.links a:hover, .links a:focus-visible { color: var(--ink); border-bottom-color: var(--hot); }
+
 @media (max-width: 420px) {
-  #screen, .bar, .notes { width: min(92vmin, 420px); }
+  #screen, .bar, .notes, .links { width: min(92vmin, 420px); }
   #screen { height: min(92vmin, 420px); }
   .scanlines { inset: 10px; }
 }
