@@ -7,8 +7,7 @@ or not.
 **[Play it](https://gcsrmsubmission.vercel.app)** · no install · works off the
 filesystem
 
-The rules come from a PICO-8 cart called `dead_center`; [what I added](#where-this-came-from)
-is at the end.
+Inspired by a game called 'Dead Center'.
 
 ## The idea
 
@@ -170,28 +169,3 @@ you add to `step()` runs exactly 60 times a second, and you can budget in frames
 `endLayout()` and its siblings are the only place a panel's geometry lives. Drawing
 and mouse hit-testing both read it, because the two drifted apart the first time
 they didn't.
-
-## Where this came from
-
-`dead_center` was a PICO-8 cart first. Its arena radius, spawn exclusion,
-collision threshold, wave timing, fire interval and six sound strings are the
-original's, and so is the 3x5 font in `src/p8.js`. The build I worked from carries
-no author name anywhere in it, so if you know whose cart it is, the credit belongs
-here and I'll add it.
-
-The rest is mine:
-
-- The browser rewrite. A 128x128 framebuffer in plain JavaScript, with the
-  rasterisers, palette and sound synth written from documented conventions rather
-  than lifted.
-- Three lives, a second and a half of grace after a hit, and the squares that
-  blink out when you lose one.
-- Debris. Anything that dies sheds pixels in its own colour and they fall off the
-  screen.
-- Cash, a wallet, and a high score that all survive a refresh.
-- The death card, the shop and the bag, all three riding the same spring in and
-  the same kick-and-drop out.
-- Four ability cards at five levels each, and a shop that prices them by how rare
-  the upgrade is.
-- A pointer drawn in the game's own pixels instead of CSS.
-- One more thing, not on this list.
