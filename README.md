@@ -4,7 +4,8 @@ A small arcade game in a 128×128 box. You can't shoot. Your ship does that on i
 own, every couple of seconds, always straight at the middle, whether you're ready
 or not.
 
-[Play it](https://funkysplash49.github.io/GCSRM_submission/) · runs on phones · no install
+**[Play it](https://gcsrmsubmission.vercel.app)** · no install · works off the
+filesystem
 
 ## The idea
 
@@ -27,49 +28,98 @@ for half a second, then empties out to an outline. You get a second and a half o
 grace afterwards and the ship strobes while it runs down, because a core you're
 sitting on would take all three squares in three frames otherwise.
 
-Every 100 points is one coin. Lose the last square and a card drops in from above,
-overshoots the middle, bounces back up and settles, showing the run's score, your
-best, and what you earned. Click play again and the earnings count down to zero
-while the wallet in the top right climbs by the same amount, then the card winds
-up and slingshots off the bottom of the screen.
+Anything that gets hit sheds a handful of pixels in its own colour, white off the
+ship and red off the rings. They arc away from wherever they were knocked loose,
+fall through the wall, and drop off the bottom of the screen.
+
+Every 100 points is one coin. Lose the last square and the ship comes apart into a
+dozen of those pixels, then a card drops in from above, overshoots the middle,
+bounces back up and settles, showing the run's score, your best, and what you
+earned. Click play again and the earnings count down to zero while the wallet in
+the top right climbs by the same amount, then the card winds up and slingshots off
+the bottom of the screen.
 
 The wallet sits up there the whole time, grey while you're playing and gold once
-you're dead. It's saved to the browser along with the high score, so it's still
-there tomorrow. There's a shop button next to play again. It lights up and does
-nothing yet.
+you're dead. It's saved to the browser along with your high score and whatever
+cards you own, so it's still there tomorrow.
+
+## The shop
+
+Next to play again. It offers one to three cards a death, each rolled
+independently: a card you don't own always turns up, and every level after that is
+rarer than the last. The price follows the odds, so a level 5 upgrade costs roughly
+ten times what a new card does. One purchase per death, then the shop greys out
+until the next run.
+
+Four cards, five levels each:
+
+| card | what it does |
+| --- | --- |
+| **burst** | a bar climbs the right-hand wall as you land shots, faster on red ones. Full bar, press Z, and for a few seconds you fire twice as often, three shots at a time, fanned twenty degrees. Then four seconds of lockout. |
+| **shard** | a ring you kill throws two red shots into the arena on the way out, somewhere in a 135° cone around the shot that killed it. They're live, and they'll take a life off you. |
+| **boom** | a ring may shake in place for four fifths of a second and then detonate. Anything the blast touches dies for 100, and that includes you. |
+| **gold** | bigger rings worth 200, or 400 on a red hit, both climbing with level. They start out as one spawn in five and take over from there. |
+
+The bag in the top-left corner of the death screen holds what you've bought.
+Click a card for its level and what it does. Either button wears a small
+exclamation mark when there's something in it you haven't looked at.
+
+There's an easter egg too. It isn't written down here.
 
 ## Controls
 
-| key | |
+| | |
 | --- | --- |
 | arrows or WASD | move |
-| Z | start |
+| Z | start a run, and fire a burst once the bar is full |
 | M | mute |
+| mouse | every button: play again, shop, the bag, return, and the cards |
 
-Play again and shop are buttons on the end card, so those need a mouse. Z does the
-same thing as play again, and so does a tap on a phone.
+The pointer is drawn in the game's own pixels, so it changes with the screen
+rather than sitting on top of it.
 
-On a phone: drag anywhere to move, tap to start.
+On a phone, drag anywhere to move and tap to start. The shop and the bag need a
+mouse for now.
 
 ## Running it
 
-Double-click `index.html`. There's no npm, no bundler and no server involved.
+No build step, no dependencies, no package manager. Two ways in:
 
-If you want a server anyway:
+**Double-click `index.html`.** It runs straight off the filesystem, which is why
+everything is a classic `<script src>` rather than an ES module.
+
+**Or serve the folder,** if you'd rather:
 
 ```
+git clone https://github.com/FunkySplash49/GCSRM_submission.git
+cd GCSRM_submission
 python3 -m http.server 8000
 ```
+
+Then open http://localhost:8000.
 
 ## How it's put together
 
 Everything is drawn one pixel at a time into a 128×128 byte array of palette
-indices, and the whole array goes to the canvas once a frame. No sprites, no images, no
-CSS animation. The wall, the ship, the score and the little `+200` popups are all
-plotted with a Bresenham line routine and a midpoint circle routine written out in
-`src/p8.js`.
+indices, and the whole array goes to the canvas once a frame. No image files, no
+audio files, no CSS animation. The wall, the ship, the score and the little `+200`
+popups are all plotted with a Bresenham line routine and a midpoint circle routine
+written out in `src/p8.js`.
 
-Same story for sound. There are no audio files. Every effect is a short string:
+The sprites that do exist are written as text. Each one is an array of strings, a
+hex digit per pixel, so a card cover or the backpack icon sits in `src/game.js`
+next to the code that draws it:
+
+```js
+var SPR_GOLD = [
+  '..9999..',
+  '.9....9.',
+  '9......9',
+  ...
+];
+```
+
+Same story for sound. Every effect is a short string:
 
 ```js
 kill200: 's3>>x5cgc4c1c0'
@@ -83,18 +133,21 @@ nothing.
 The wall is the part I like most. It's a 126-point polyline at radius 58, and every
 impact adds a wavelet that creeps outward around the circumference for two seconds
 while fading. Land four shots in quick succession and the whole ring goes wobbly.
+Two wavelets overlapping add their displacement, so crests stack and opposite
+phases cancel.
 
-The end card falls on a damped spring, which is why it carries its momentum past
-the middle and has to come back up for it. Going out it gets a small upward kick
-and then constant downward acceleration, which reads as the same move in reverse.
+The death card, the shop and the bag all fall on the same damped spring, which is
+why each one carries its momentum past the middle and has to come back up for it.
+Going out they get a small upward kick and then constant downward acceleration,
+which reads as the same move in reverse.
 
 ### Files
 
 ```
 index.html      the page
 style.css       the cabinet around the screen
-src/p8.js       framebuffer, rasterisers, font, sound synth
-src/game.js     the rules
+src/p8.js       framebuffer, rasterisers, font, sprite blitter, sound synth
+src/game.js     the rules, the cards, the shop, the three panels
 ```
 
 ### Two things to know before you change anything
@@ -103,5 +156,6 @@ The loop runs on a fixed 60 Hz accumulator instead of raw `requestAnimationFrame
 so the game plays at the same speed on a 144 Hz monitor as on a 60 Hz one. Whatever
 you add to `step()` runs exactly 60 times a second, and you can budget in frames.
 
-Key presses are latched rather than sampled each frame. Someone mashing Z can press
-and release inside a single frame, and the press still counts.
+`endLayout()` and its siblings are the only place a panel's geometry lives. Drawing
+and mouse hit-testing both read it, because the two drifted apart the first time
+they didn't.

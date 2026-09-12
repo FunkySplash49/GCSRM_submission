@@ -154,6 +154,22 @@
     for (var y = flr(y0); y <= flr(y1); y++) { pset(x0, y, c); pset(x1, y, c); }
   }
 
+  // Sprites are arrays of strings, one row each: a hex digit is a palette index
+  // and '.' is transparent. Hand-authored, like the font, because the project
+  // has no image files to load.
+  // from/to swap one palette index on the way out, which is how a sprite gets a
+  // hover state without a second copy of the art.
+  function spr(rows, x, y, from, to) {
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      for (var i = 0; i < row.length; i++) {
+        if (row[i] === '.') continue;
+        var c = parseInt(row[i], 16);
+        pset(x + i, y + r, c === from ? to : c);
+      }
+    }
+  }
+
   // print() with two inline control codes: \6w doubles the width of everything
   // after it and \6t doubles the height. The score uses both.
   function print(str, x, y, c) {
@@ -388,7 +404,7 @@
   global.P8 = {
     W: W, H: H, fb: fb, PALETTE: PALETTE, FONT: FONT,
     cls: cls, camera: camera, line: line, circ: circ, circfill: circfill,
-    rect: rect, rectfill: rectfill, print: print, pset: pset,
+    rect: rect, rectfill: rectfill, print: print, pset: pset, spr: spr,
     cos: p8cos, sin: p8sin, atan2: p8atan2, rnd: rnd, flr: flr,
     each: each, all: all, del: del,
     Screen: Screen, Audio: Audio, renderSfx: renderSfx, parseSfx: parseSfx

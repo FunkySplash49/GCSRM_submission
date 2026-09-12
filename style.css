@@ -66,6 +66,7 @@ body {
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   background: #000;
+  cursor: none;                 /* the game draws its own, in its own pixels */
   border-radius: 3px;
   touch-action: none;
   cursor: crosshair;

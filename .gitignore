@@ -1,7 +1,15 @@
 # Local research material. Not part of the project.
 archive/
 
-# Local agent notes.
+# Working notes, not documentation.
 CLAUDE.md
+DESIGN.md
+
+# Source art for the sprites. Every one of them is traced into src/game.js as a
+# hex-string array, so the app runs without this folder. Keep your own backup:
+# git is not holding these.
+assest/
 
 .DS_Store
+.vercel
+.env*

@@ -46,30 +46,103 @@
   var cash;           // this run's earnings, score / 100
   var highScore = 0, bank = 0;   // bank is the wallet: every run ever, added up
 
-  // The end card's life, in order: slide in and settle, wait for a button, pay
-  // the run's cash into the wallet, then launch back out the way it came.
-  var PH_IN = 0, PH_WAIT = 1, PH_CASHOUT = 2, PH_OUT = 3;
+  // The four abilities, and what level of each you own. 0 means you don't.
+  var MAX_LV = 5;
+  var C_BURST = 0, C_SHARD = 1, C_BOOM = 2, C_GOLD = 3;
+  var lv = [0, 0, 0, 0];
+  var shopSeen = false;          // the shop badge only nags until you look once
+  var invNew = false;            // something arrived in the bag since you last opened it
+
+  // Three panels share one slide: the death card, the shop and the bag. Each
+  // drops in on a spring, waits for a click, and launches back out. `next` is
+  // what replaces it once it has gone -- PANEL_NONE meaning the run restarts.
+  var PANEL_NONE = 0, PANEL_DEAD = 1, PANEL_SHOP = 2, PANEL_INV = 3;
+  var PH_IN = 0, PH_WAIT = 1, PH_CASHOUT = 2, PH_SPEND = 3, PH_OUT = 4;
   var END_K = 0.16, END_DAMP = 0.68, END_START = -90;
   var END_KICK = -2.4, END_GRAV = 0.6;   // the wind-up, then the slingshot
-  var ending, endPhase, panelY, panelVy, panelW;
-  var cashAcc, cashStep;
+  var ending, panel = PANEL_NONE, panelNext, phase, panelY, panelVy, panelW;
+  var cashAcc, cashStep, spendLeft;
+
+  var offers = [];      // what the shop is showing, and for how much
+  var picked = -1;      // which inventory slot is selected
+  var bought = false;   // one card per death, and this is the death you bought on
+
+  // ---- the four abilities, and the numbers behind them
+  var BURST_HITS = 4;              // kills to fill the bar at level 1
+  var BURST_RUN = 180;             // frames it stays open at level 1
+  var BURST_COOL = 240;            // four seconds locked out afterwards
+  var BURST_IDLE = 660;            // eleven quiet seconds and the bar starts leaking
+  var BURST_SPREAD = 20 / 360;     // twenty degrees, in turns
+  var SHARD_CONE = 135 / 360, SHARD_MIN = 12.5 / 360;
+  var BOOM_FUSE = 48, BOOM_GROW = 1.2, BOOM_REACH = 2.5;
+  var GOLDC = 9;                   // the ring's own orange, for its chips
+
+  // Type the word on the title screen and red projectiles start painting the
+  // wall. Session only: it is deliberately not saved, so it goes when you do.
+  var CODE = 'easter';
+  var RAMP = [8, 9, 10, 11, 12, 13, 14];   // red orange yellow green blue indigo pink
+  var typed = '', rainbow = false, codeShown = 0;
+
+  var burstBar, burstOn, burstCool, sinceKill;
+  var blasts;                      // white rings opening out of a detonation
+
+  function burstNeed() { return BURST_HITS * Math.pow(1.2, lv[C_BURST] - 1); }
+  function burstRun()  { return BURST_RUN * Math.pow(1.4, lv[C_BURST] - 1); }
+  function shardChance() { return lv[C_SHARD] ? 0.15 + 0.10 * (lv[C_SHARD] - 1) : 0; }
+  function boomChance()  { return lv[C_BOOM]  ? 0.10 + 0.08 * (lv[C_BOOM]  - 1) : 0; }
+  function goldChance()  { return lv[C_GOLD]  ? 0.20 + 0.10 * (lv[C_GOLD]  - 1) : 0; }
+  function goldPoints(charged) {
+    return (charged ? 400 : 200) + (lv[C_GOLD] - 1) * (charged ? 200 : 100);
+  }
+  function coreHit(c) { return c.gold ? 44 : 32; }   // squared, and gold is bigger
+
+  // Chips knocked off whatever just got hit. They carry the colour of the thing
+  // they came from, arc away from its edge, and fall off the bottom of the
+  // screen. Kept out of fx because the wall loop walks that list every frame.
+  var GRAVITY = 0.12;
+  var bits;
+
+  // scale multiplies each chip's side, rounded to whole pixels because that is
+  // all there is at this resolution. Rings pass 1.5; the ship leaves it alone.
+  function shave(x, y, r, c, n, speed, scale) {
+    scale = scale || 1;
+    for (var i = 0; i < n; i++) {
+      var a = rnd(), v = speed * (0.5 + rnd(0.6));
+      add(bits, {
+        x: x + cos(a) * r, y: y + sin(a) * r,      // off the surface, not the middle
+        vx: cos(a) * v, vy: sin(a) * v - 0.5,      // a little lift, so they arc
+        s: max(1, Math.round((rnd() < 0.3 ? 2 : 1) * scale)), c: c
+      });
+    }
+  }
 
   // Mouse, kept in game coordinates. Only the end card cares.
   var mouseX = 0, mouseY = 0, mouseIn = false, clickWanted = false;
   var hoverBtn = -1;
 
-  // High score and the cash bank outlive the tab. Wrapped because private
-  // browsing throws on the first read rather than returning null.
+  // High score, wallet and owned cards outlive the tab. Set this false to make
+  // every refresh start from nothing, which is how the shop was tested.
+  var PERSIST = true;
+
+  // Wrapped because private browsing throws on the first read rather than
+  // returning null.
   function load() {
+    if (!PERSIST) { save(); return; }     // stamp the defaults over whatever was there
     try {
       highScore = +localStorage.getItem('dc.hi') || 0;
       bank = +localStorage.getItem('dc.bank') || 0;
-    } catch (e) { /* no storage, no problem */ }
+      lv = JSON.parse(localStorage.getItem('dc.lv') || '[0,0,0,0]');
+      shopSeen = localStorage.getItem('dc.shopseen') === '1';
+      invNew = localStorage.getItem('dc.invnew') === '1';
+    } catch (e) { /* no storage, or nothing parseable in it */ }
   }
   function save() {
     try {
       localStorage.setItem('dc.hi', highScore);
       localStorage.setItem('dc.bank', bank);
+      localStorage.setItem('dc.lv', JSON.stringify(lv));
+      localStorage.setItem('dc.shopseen', shopSeen ? '1' : '0');
+      localStorage.setItem('dc.invnew', invNew ? '1' : '0');
     } catch (e) { /* ditto */ }
   }
 
@@ -104,10 +177,13 @@
       y = sin(a) * d;
       x = cos(a) * d;
     } while (dist2(player, { x: x, y: y }) <= 2304);
-    var drift = rnd();
+    var drift = rnd(), gold = rnd() < goldChance();
     add(fx, { x: x, y: y, life: 2 });
     shake += 1;
-    add(cores, { x: x, y: y, vx: cos(drift) * 0.25, vy: sin(drift) * 0.25 });
+    add(cores, {
+      x: x, y: y, vx: cos(drift) * 0.25, vy: sin(drift) * 0.25,
+      gold: gold, r: gold ? 4 : 3, fuse: 0
+    });
     sfx(SFX.spawn);
   }
 
@@ -130,12 +206,18 @@
     player = { x: 0, y: 32 };
     score = 0;
     fx = [];
+    bits = [];
     shake = 0;
     lives = LIVES;
     invuln = 0;
     hurtFlash = 0;
     cash = 0;
     ending = false;
+    burstBar = 0;
+    burstOn = false;
+    burstCool = 0;
+    sinceKill = 0;
+    blasts = [];
   }
 
   //
@@ -148,7 +230,11 @@
     lives -= 1;
     hurtFlash = 30;
     invuln = 90;
-    if (lives <= 0) gameOver();
+    if (lives > 0) shave(player.x, player.y, 4, 7, 3 + flr(rnd(4)), 1.1);
+    else {
+      shave(player.x, player.y, 4, 7, 6 + flr(rnd(7)), 2.2);   // the ship comes apart
+      gameOver();
+    }
   }
 
   // The run's cash deliberately does not reach the wallet here. It sits on the
@@ -158,10 +244,73 @@
     if (score > highScore) highScore = score;
     save();
     ending = true;
-    endPhase = PH_IN;
+    bought = false;
+    openPanel(PANEL_DEAD);
+  }
+
+  function openPanel(p) {
+    panel = p;
+    phase = PH_IN;
     panelY = END_START;
     panelVy = 0;
-    panelW = cardWidth();
+    if (p === PANEL_DEAD) panelW = cardWidth();
+    if (p === PANEL_SHOP) rollOffers();
+    if (p === PANEL_INV) picked = firstOwned();
+  }
+
+  // Send the current panel out of the bottom of the screen, and say what takes
+  // its place when it has gone.
+  function leavePanel(next) {
+    panelNext = next;
+    phase = PH_OUT;
+    panelVy = END_KICK;
+  }
+
+  // The badge is the whole point of routing a purchase through here rather
+  // than writing to lv directly.
+  function addCard(i) {
+    lv[i] = min(MAX_LV, lv[i] + 1);
+    invNew = true;
+    save();
+  }
+
+  function firstOwned() {
+    for (var i = 0; i < 4; i++) if (lv[i] > 0) return i;
+    return -1;
+  }
+
+  // A card at level L shows with probability 1/(L+1)^1.45, so a card you don't
+  // own is certain and each upgrade past that is rarer than the last. The shelf
+  // is never empty and never holds more than three.
+  function offerChance(i) { return 1 / Math.pow(lv[i] + 1, 1.45); }
+
+  function rollOffers() {
+    var pool = [], hit = [];
+    for (var i = 0; i < 4; i++) {
+      if (lv[i] >= MAX_LV) continue;
+      pool.push(i);
+      if (rnd() < offerChance(i)) hit.push(i);
+    }
+    if (!hit.length && pool.length) hit.push(pool[flr(rnd(pool.length))]);
+    while (hit.length > 3) hit.splice(flr(rnd(hit.length)), 1);
+
+    // Price tracks rarity: the base is 5 to 10 coins for a card you don't own,
+    // and it climbs by exactly the factor the odds fall by. Capped at 1000.
+    offers = [];
+    for (var j = 0; j < hit.length; j++) {
+      var id = hit[j], base = 5 + flr(rnd(6));
+      offers.push({ id: id, cost: min(1000, max(1, Math.round(base / offerChance(id)))) });
+    }
+  }
+
+  function buy(o) {
+    if (bought || bank < o.cost) return;
+    bought = true;
+    addCard(o.id);
+    spendLeft = o.cost;
+    cashAcc = 0;
+    cashStep = max(0.34, o.cost / 30);
+    phase = PH_SPEND;
   }
 
   function startGame() {
@@ -175,7 +324,7 @@
   // Pay out over roughly half a second however big the haul, with a floor so a
   // three-coin run is still long enough to read.
   function startCashout() {
-    endPhase = PH_CASHOUT;
+    phase = PH_CASHOUT;
     cashAcc = 0;
     cashStep = max(0.34, cash / 30);
     if (cash <= 0) launchCard();
@@ -183,26 +332,25 @@
 
   function launchCard() {
     save();
-    endPhase = PH_OUT;
-    panelVy = END_KICK;
+    leavePanel(PANEL_NONE);
   }
 
-  // One frame of the end card, whichever part of its life it's in.
+  // One frame of whichever panel is up, wherever it is in its life.
   function stepEnd() {
-    if (endPhase === PH_IN) {
-      // Spring, not a tween: the card carries its momentum past the middle and
+    if (phase === PH_IN) {
+      // Spring, not a tween: the panel carries its momentum past the middle and
       // has to come back up for it.
       panelVy += (0 - panelY) * END_K;
       panelVy *= END_DAMP;
       panelY += panelVy;
-      if (abs(panelY) < 0.5 && abs(panelVy) < 0.5) { panelY = 0; endPhase = PH_WAIT; }
+      if (abs(panelY) < 0.5 && abs(panelVy) < 0.5) { panelY = 0; phase = PH_WAIT; }
 
-    } else if (endPhase === PH_WAIT) {
+    } else if (phase === PH_WAIT) {
       hoverBtn = mouseIn ? hitButton(mouseX, mouseY) : -1;
-      // Button 1 is the shop. It lights up and does nothing, for now.
-      if (btnp(4) || (clickWanted && hoverBtn === 0)) startCashout();
+      if (clickWanted && hoverBtn >= 0) activate(layout().btns[hoverBtn]);
+      if (btnp(4) && panel === PANEL_DEAD) startCashout();
 
-    } else if (endPhase === PH_CASHOUT) {
+    } else if (phase === PH_CASHOUT) {
       // Drain the card into the wallet a coin at a time. Both counters stay
       // whole numbers; only the rate is fractional.
       cashAcc += cashStep;
@@ -214,14 +362,129 @@
       }
       if (cash <= 0) launchCard();
 
+    } else if (phase === PH_SPEND) {
+      // The same counter running the other way: the price comes out of the
+      // wallet before the shop leaves, so you watch what it cost you.
+      cashAcc += cashStep;
+      while (cashAcc >= 1 && spendLeft > 0) {
+        cashAcc -= 1;
+        spendLeft -= 1;
+        bank -= 1;
+        if (spendLeft % 2 === 0) sfx(SFX.coin);
+      }
+      if (spendLeft <= 0) { save(); leavePanel(PANEL_DEAD); }
+
     } else {
       panelVy += END_GRAV;
       panelY += panelVy;
-      if (panelY > 110) { ending = false; startGame(); }
+      if (panelY > 110) {
+        if (panelNext === PANEL_NONE) { ending = false; panel = PANEL_NONE; startGame(); }
+        else openPanel(panelNext);
+      }
     }
 
-    if (endPhase !== PH_WAIT || !ending) hoverBtn = -1;
-    setCursor(hoverBtn >= 0);
+    if (phase !== PH_WAIT || !ending) hoverBtn = -1;
+  }
+
+  // What a button does. Buttons carry a kind rather than an index so the three
+  // panels can lay themselves out however they like.
+  function activate(b) {
+    if (b.dim) return;
+    if (b.kind === 'again') startCashout();
+    else if (b.kind === 'shop') { shopSeen = true; save(); leavePanel(PANEL_SHOP); }
+    else if (b.kind === 'bag') { invNew = false; save(); leavePanel(PANEL_INV); }
+    else if (b.kind === 'back') leavePanel(PANEL_DEAD);
+    else if (b.kind === 'buy') buy(offers[b.i]);
+    else if (b.kind === 'slot') picked = b.i;
+  }
+
+  // -------------------------------------------------------------- abilities
+
+  // A shot lands on a ring. It always scores; whether the ring dies now or
+  // stands there shaking with a fuse lit is the explosion card's business.
+  function coreShot(c, o) {
+    var charged = !!o.charged;
+    var points = c.gold ? goldPoints(charged) : (charged ? 200 : 100);
+    sfx(charged ? SFX.kill200 : SFX.kill100);
+    score += points;
+    cash = flr(score / 100);
+    sinceKill = 0;
+    add(fx, { x: c.x, y: c.y - 4, points: points, life: 40 });
+    charge(charged);
+    if (c.fuse > 0) return;                         // already counting down
+    if (rnd() < boomChance()) { c.fuse = BOOM_FUSE; return; }
+    popCore(c, atan2(o.vx, o.vy));
+  }
+
+  // The ring actually leaving. `angle` is the heading of the shot that did it;
+  // a chain kill passes null and never throws shrapnel, so nothing has to work
+  // out an impact vector for it.
+  function popCore(c, angle) {
+    del(cores, c);
+    add(fx, { x: c.x, y: c.y, life: 2 });
+    shave(c.x, c.y, c.r, c.gold ? GOLDC : 8, 3 + flr(rnd(4)), 1.1, 1.5);
+    shake += 3;
+    if (angle !== null && rnd() < shardChance()) shards(c, angle);
+  }
+
+  // Two red projectiles into a 135 degree cone around the killing shot, never
+  // within 12.5 degrees of each other.
+  function shards(c, base) {
+    var a1 = base + (rnd() - 0.5) * SHARD_CONE, a2;
+    do { a2 = base + (rnd() - 0.5) * SHARD_CONE; } while (abs(a1 - a2) < SHARD_MIN);
+    shard(c, a1);
+    shard(c, a2);
+  }
+  function shard(c, a) {
+    add(orbs, { x: c.x, y: c.y, vx: cos(a) * 3, vy: sin(a) * 3, charged: true });
+  }
+
+  function blowUp(c) {
+    popCore(c, null);
+    add(blasts, { x: c.x, y: c.y, r: 0, max: c.r * BOOM_REACH });
+    sfx(SFX.burnout);
+    shake += 5;
+  }
+
+  // Red projectiles fill the bar twice as fast. Nothing charges it while the
+  // ability is open or while it is cooling down.
+  function charge(charged) {
+    if (!lv[C_BURST] || burstOn || burstCool > 0) return;
+    burstBar = min(1, burstBar + (charged ? 2 : 1) / burstNeed());
+  }
+
+  function stepBurst() {
+    sinceKill += 1;
+    if (burstCool > 0) burstCool -= 1;
+    if (burstOn) {
+      burstBar -= 1 / burstRun();
+      if (burstBar <= 0) { burstBar = 0; burstOn = false; burstCool = BURST_COOL; }
+    } else if (burstCool <= 0 && sinceKill > BURST_IDLE) {
+      burstBar = max(0, burstBar - 1 / 600);        // a slow leak, nothing more
+    }
+  }
+
+  // Each blast opens out to two and a half times its ring's radius, taking
+  // whatever it touches with it -- you included.
+  function stepBlasts() {
+    each(blasts, function (b) {
+      b.r += BOOM_GROW;
+      if (b.r > b.max) { del(blasts, b); return; }
+      var r2 = b.r * b.r;
+      each(cores, function (c) {
+        if (c.caught) return;
+        var dx = c.x - b.x, dy = c.y - b.y;
+        if (dx * dx + dy * dy > r2) return;
+        c.caught = true;
+        score += 100;
+        cash = flr(score / 100);
+        sinceKill = 0;
+        add(fx, { x: c.x, y: c.y - 4, points: 100, life: 40 });
+        if (rnd() < boomChance()) c.fuse = BOOM_FUSE;
+        else popCore(c, null);
+      });
+      if (playing && dist2(player, b) < r2) hit();
+    });
   }
 
   // ------------------------------------------------------------------- input
@@ -239,14 +502,6 @@
   function press(bit) { btnState |= 1 << bit; btnHit |= 1 << bit; }
   function release(bit) { btnState &= ~(1 << bit); }
 
-  // The canvas is one element, so a hand cursor is the only way to tell you
-  // that part of it is a button. Only touched when it actually changes.
-  var canvasEl = null, cursorOn = false;
-  function setCursor(on) {
-    if (on === cursorOn || !canvasEl) return;
-    cursorOn = on;
-    canvasEl.style.cursor = on ? 'pointer' : '';
-  }
 
   // --------------------------------------------------------------- game step
   // One step: simulate, then draw. Called exactly 60 times a second.
@@ -257,6 +512,15 @@
       e.life -= 1;
       if (e.life === 0) del(fx, e);
     });
+    each(bits, function (b) {
+      b.vy += GRAVITY;
+      b.x += b.vx;
+      b.y += b.vy;
+      if (b.y > 72 || b.x < -72 || b.x > 72) del(bits, b);
+    });
+    if (codeShown > 0) codeShown -= 1;
+    stepBurst();
+    stepBlasts();
     shake -= min(0.125, shake);
     if (invuln > 0) invuln -= 1;
     if (hurtFlash > 0) hurtFlash -= 1;
@@ -283,7 +547,8 @@
         c.x += c.vx;
         c.y += c.vy;
         wall(c, 3);
-        if (dist2(c, player) < 32) hit();
+        if (c.fuse > 0 && --c.fuse === 0) { blowUp(c); return; }
+        if (dist2(c, player) < coreHit(c)) hit();
       });
 
       // ---- orbs
@@ -292,7 +557,9 @@
         o.y += o.vy;
         var bounce = wall(o, 1);
         if (bounce !== null) {
-          add(fx, { angle: bounce, life: 120 });     // ripple in the wall
+          // rb marks the ripple as a red projectile's, which is the only kind
+          // the easter egg paints.
+          add(fx, { angle: bounce, life: 120, rb: !!o.charged });
           shake += 0.5;
           if (o.charged) {
             sfx(SFX.burnout);
@@ -307,30 +574,29 @@
         } else {
           for (var i = 0; i < cores.length; i++) {
             var c = cores[i];
-            if (dist2(o, c) < 32) {
-              del(orbs, o);
-              del(cores, c);
-              var points = 100;
-              if (o.charged) { points = 200; sfx(SFX.kill200); }
-              else sfx(SFX.kill100);
-              score += points;
-              cash = Math.floor(score / 100);
-              add(fx, { x: c.x, y: c.y, life: 2 });
-              shake += 3;
-              add(fx, { x: c.x, y: c.y - 4, points: points, life: 40 });
-              break;
-            }
+            if (dist2(o, c) < coreHit(c)) { del(orbs, o); coreShot(c, o); break; }
           }
         }
       });
 
-      // ---- the ship fires itself, always straight at dead center
+      // ---- burst shot: a full bar and a press of Z opens it up
+      if (lv[C_BURST] && btnp(4) && !burstOn && burstCool <= 0 && burstBar >= 1) {
+        burstOn = true;
+        sfx(SFX.start);
+      }
+
+      // ---- the ship fires itself, always straight at dead center. Burst shot
+      // halves the interval and puts three shots through a twenty degree fan.
       fireTimer -= 1;
       if (fireTimer <= 0) {
         var aim = atan2(-player.x, -player.y);
-        add(orbs, { x: player.x, y: player.y, vx: cos(aim) * 3, vy: sin(aim) * 3 });
+        var n = burstOn ? 3 : 1;
+        for (var k = 0; k < n; k++) {
+          var a = aim + (n > 1 ? (k / (n - 1) - 0.5) * BURST_SPREAD : 0);
+          add(orbs, { x: player.x, y: player.y, vx: cos(a) * 3, vy: sin(a) * 3 });
+        }
         shake += 0.5;
-        fireTimer = fireInterval;
+        fireTimer = burstOn ? max(5, flr(fireInterval / 2)) : fireInterval;
         sfx(SFX.fire);
       }
 
@@ -375,23 +641,48 @@
 
     for (var i = 0; i < orbs.length; i++)
       P.circfill(orbs[i].x, orbs[i].y, 1, orbs[i].charged ? 8 : 7);
-    for (var i = 0; i < cores.length; i++)
-      P.circ(cores[i].x, cores[i].y, 3, 8);
+    // A lit ring shakes where it stands, a pixel either way, without losing
+    // its drift.
+    for (var i = 0; i < cores.length; i++) {
+      var c = cores[i];
+      var jx = c.fuse > 0 ? flr(rnd(3)) - 1 : 0, jy = c.fuse > 0 ? flr(rnd(3)) - 1 : 0;
+      if (c.gold) P.spr(SPR_GOLD, flr(c.x) - 4 + jx, flr(c.y) - 4 + jy);
+      else P.circ(c.x + jx, c.y + jy, 3, 8);
+    }
+    for (var i = 0; i < blasts.length; i++)
+      P.circ(blasts[i].x, blasts[i].y, blasts[i].r, 7);
 
     // The wall. A closed polyline of 126 points at radius 58, bent by every
     // live effect: each ripple is a wavelet whose centre creeps .002 turns per
     // frame away from its impact angle, with amplitude life/30.
     P.line();
     for (var t = 0; t <= 1; t += RING_STEP) {
-      var r = 58;
+      var r = 58, loudest = 0, hue = -1;
       for (var j = 0; j < fx.length; j++) {
         var e = fx[j];
         var d = abs(t - (e.angle !== undefined ? e.angle : e.x));
         d = min(d, 1 - d);
         d = d - 0.002 * (120 - e.life);
-        if (abs(d + 0.125) < 0.14) r += cos(d / 0.08) * e.life / 30;
+        if (abs(d + 0.125) >= 0.14) continue;
+        r += cos(d / 0.08) * e.life / 30;           // displacement always sums
+        if (!rainbow || !e.rb) continue;
+        // Position across the packet: -1 at one edge, 1 at the other.
+        var u = (d + 0.125) / 0.14;
+        // Colour rides the packet's envelope rather than the ripples inside it.
+        // The wavelet crosses zero seven times on its way across, and keying
+        // colour off that broke the band into stripes.
+        var env = (1 - abs(u)) * (e.life / 120);
+        // Two waves crossing: whichever has the louder envelope here colours
+        // the segment. Averaging two palette indices lands on an unrelated
+        // colour, so the loudest wins instead of blending.
+        if (env <= loudest) continue;
+        loudest = env;
+        var band = flr((u + 1) / 2 * RAMP.length);
+        hue = RAMP[band < 0 ? 0 : band >= RAMP.length ? RAMP.length - 1 : band];
       }
-      P.line(cos(t) * r + 0.5, sin(t) * r, 7);
+      // Below the floor the envelope has nothing left, which is what makes the
+      // band taper to white at both ends and as the wave dies.
+      P.line(cos(t) * r + 0.5, sin(t) * r, loudest > 0.06 ? hue : 7);
     }
 
     for (var i = 0; i < fx.length; i++) {
@@ -400,9 +691,21 @@
       else if (e.y !== undefined) P.circfill(e.x, e.y, 5, 7);
     }
 
+    for (var i = 0; i < bits.length; i++) {
+      var b = bits[i];
+      if (b.s > 1) P.rectfill(b.x, b.y, b.x + b.s - 1, b.y + b.s - 1, b.c);
+      else P.pset(b.x, b.y, b.c);
+    }
+
+    if (codeShown > 0) drawCode();
     drawLives();
+    drawBurstBar();
     drawWallet();
-    if (ending) drawEndCard();
+    if (ending) drawPanel();
+
+    // Ours, drawn last so nothing paints over it. The canvas hides the
+    // browser's, which is why this has to run whether a panel is up or not.
+    if (mouseIn) P.spr(SPR_CURSOR, flr(mouseX), flr(mouseY));
   }
 
   // Three squares in the bottom-left corner, outside the wall. A square you
@@ -422,6 +725,30 @@
   // The wallet, top right, always on screen. Dimmed while you play, gold once
   // the run is over and the card starts feeding it. Spelled out rather than
   // "$3" because at 3x5 the dollar glyph is a dead ringer for a 5.
+  // Written in the thing it turns on. The offset walks with the frame count so
+  // the letters shimmer, and the last half second flickers out.
+  function drawCode() {
+    var msg = 'rainbow wave enabled';
+    var x = -flr((msg.length * 4 - 1) / 2);
+    if (codeShown < 30 && flr(codeShown / 4) % 2) return;
+    for (var i = 0; i < msg.length; i++)
+      P.print(msg[i], x + i * 4, 22, RAMP[(i + flr(codeShown / 4)) % RAMP.length]);
+  }
+
+  // The bar rides just outside the wall on the right, as long as the arena's
+  // radius. Grey while it fills, white when it is ready, red while it is open,
+  // dark while it is locked out.
+  function drawBurstBar() {
+    if (!lv[C_BURST] || ending) return;
+    var x = 60, top = -29, bot = 29;
+    var cold = burstCool > 0;
+    P.rect(x, top, x + 2, bot, cold ? 5 : GREY);
+    var h = flr(58 * min(1, burstBar));
+    if (h > 0)
+      P.rectfill(x + 1, bot - h, x + 1, bot - 1,
+                 cold ? 5 : burstOn ? RED : burstBar >= 1 ? 7 : 6);
+  }
+
   function drawWallet() {
     var s = 'cash: ' + bank;
     P.print(s, 61 - s.length * 4, -60, ending ? GOLD : GREY);
@@ -432,6 +759,140 @@
   // so the buttons ride along with the card through every animation.
   var CARD_H = 34, BTN_H = 11, BTN_GAP = 4, CARD_GAP = 4;
   var BTN_LABELS = ['play again', 'shop'];
+
+  // The bag, traced down from the reference art to 7x7: strap nubs, a grey flap
+  // with its bottom edge, a white front and a pocket. At this size the black
+  // outline the source leans on costs more pixels than it earns, so the shapes
+  // sit straight on the grey tile and the tile does the separating. Seven is the
+  // floor -- at six the flap and the pockets collapse into each other.
+  var SPR_BAG = [
+    '..666..',
+    '6666666',
+    '0000000',
+    '7777777',
+    '7000007',
+    '7777777',
+    '6666666'
+  ];
+
+  // The card covers, traced out of the .ppp files in assest/ and recoloured to
+  // the palette: the source reds become the game's red and orange so a card
+  // reads as the thing it does. Gold Rings uses the ring sprite as its own cover.
+  var SPR_CARD = [
+    [ '7..........',
+      '77.........',
+      '777..77..77',
+      '77.........',
+      '7..........' ],
+    [ '....99......',
+      '9....9......',
+      '..........8.',
+      '.........7..',
+      '.88..777..7.',
+      '.89.7...7.7.',
+      '.....77.7...',
+      '......7.7...',
+      '..7...77....',
+      '...77.......',
+      '...........9',
+      '99........99',
+      '.9..........' ],
+    [ '99.............',
+      '99...888888..99',
+      '....8......8..9',
+      '...8........8..',
+      '..8999.......8.',
+      '..8..999.....8.',
+      '..8..9.......8.',
+      '..8...9......8.',
+      '..8.......9..8.',
+      '..8......99..8.',
+      '...8......998..',
+      '....8......8...',
+      '.99..888888....',
+      '.99...........9' ],
+    [ '..9999..',
+      '.9....9.',
+      '9......9',
+      '9......9',
+      '9......9',
+      '9......9',
+      '.9....9.',
+      '..9999..' ]
+  ];
+  var SPR_GOLD = SPR_CARD[C_GOLD];
+
+  var SPR_RETURN = [
+    'dddddddddddddddd',
+    'd..............d',
+    'd..............d',
+    'd...77777777...d',
+    'd..7........7..d',
+    'd..7........7..d',
+    'd..7........7..d',
+    'd...........7..d',
+    'd.....7.....7..d',
+    'd....7......7..d',
+    'd...77777777...d',
+    'd....7.........d',
+    'd.....7........d',
+    'd..............d',
+    'd..............d',
+    'dddddddddddddddd'
+  ];
+
+  // Drawn into the framebuffer rather than set as a CSS cursor, so it lives in
+  // the same 128x128 as everything else. The canvas hides the real one.
+  var SPR_CURSOR = [
+    '88..........',
+    '8888........',
+    '.8888.......',
+    '.888888.....',
+    '..8888888...',
+    '...8888888..',
+    '...88888888.',
+    '....888888..',
+    '....88888...',
+    '.....888.8..',
+    '......8...8.',
+    '...........8'
+  ];
+
+  // Name, and a description wrapped by hand to the widths the two panels allow.
+  var CARD_NAME = ['burst', 'shard', 'boom', 'gold'];
+  var CARD_DESC = [
+    ['z fires a fast wide burst', 'once the bar is full'],
+    ['kills spray two red shots', 'into the arena'],
+    ['kills may blow up, taking', 'nearby rings and you'],
+    ['bigger rings, double the', 'points, red hits pay more']
+  ];
+
+  // Something wants looking at. The black field is the point: it punches the
+  // badge out of whatever it lands on, grey border or red one.
+  var SPR_BANG = [
+    '00000',
+    '08880',
+    '08880',
+    '00800',
+    '00800',
+    '00000',
+    '00800',
+    '00000'
+  ];
+
+  // The same mark for the bag tile, which is too small to wear the big one.
+  var SPR_BANG_S = [
+    '000',
+    '080',
+    '080',
+    '000',
+    '080',
+    '000'
+  ];
+
+  // The bag tile sits in the top-left corner and stays there, so it is the one
+  // button that does not ride the card.
+  var INV_X = -60, INV_Y = -60, INV_W = 8;
 
   function textW(s) { return s.length * 4 - 1; }
   function endLines() {
@@ -446,7 +907,15 @@
     return w + 12;
   }
 
-  function endLayout() {
+  // ------------------------------------------------------------ the panels
+  // Every panel is measured from `top`, which is the only thing panelY moves,
+  // so the whole screen rides the spring as one piece. layout() is the single
+  // source of the geometry: drawing and hit-testing both read it.
+
+  function sprW(sp) { return sp[0].length; }
+  function sprH(sp) { return sp.length; }
+
+  function deadLayout() {
     var w = panelW;
     var bw = [textW(BTN_LABELS[0]) + 9, textW(BTN_LABELS[1]) + 9];
     var rowW = bw[0] + BTN_GAP + bw[1];
@@ -454,35 +923,181 @@
 
     var lay = { x: -flr(w / 2), y: top, w: w, btns: [] };
     var bx = -flr(rowW / 2), by = top + CARD_H + CARD_GAP;
+    var kinds = ['again', 'shop'];
     for (var i = 0; i < 2; i++) {
-      lay.btns.push({ label: BTN_LABELS[i], x: bx, y: by, w: bw[i] });
+      lay.btns.push({
+        kind: kinds[i], label: BTN_LABELS[i], x: bx, y: by, w: bw[i], h: BTN_H,
+        badge: i === 1 && !shopSeen && !bought, dim: i === 1 && bought
+      });
       bx += bw[i] + BTN_GAP;
+    }
+    lay.btns.push({
+      kind: 'bag', x: INV_X, y: INV_Y, w: INV_W, h: INV_W, small: true, badge: invNew
+    });
+    return lay;
+  }
+
+  // Shop: a header, up to three cards across, and the hovered card's blurb
+  // along the bottom. The blurb is full width because three columns of this
+  // font is ten characters each, which is a name and not a description.
+  var SHOP_X = -60, SHOP_W = 119, SHOP_H = 90;
+  var SLOT_W = 35, SLOT_H = 45;
+
+  function shopLayout() {
+    var top = flr(panelY) - flr(SHOP_H / 2);
+    var lay = { x: SHOP_X, y: top, w: SHOP_W, h: SHOP_H, btns: [] };
+    lay.btns.push({ kind: 'back', x: SHOP_X + SHOP_W - 17, y: top + 2, w: 15, h: 15 });
+    for (var i = 0; i < offers.length; i++)
+      lay.btns.push({
+        kind: 'buy', i: i, x: SHOP_X + 3 + i * (SLOT_W + 3), y: top + 20,
+        w: SLOT_W, h: SLOT_H, dim: bank < offers[i].cost
+      });
+    return lay;
+  }
+
+  // Inventory: owned cards on the left, the selected one's sprite and level on
+  // the right, its words along the bottom for the same reason as the shop.
+  var INVP_X = -60, INVP_W = 119, INVP_H = 88;
+
+  function invLayout() {
+    var top = flr(panelY) - flr(INVP_H / 2);
+    var lay = { x: INVP_X, y: top, w: INVP_W, h: INVP_H, btns: [] };
+    lay.btns.push({ kind: 'back', x: INVP_X + INVP_W - 17, y: top + 2, w: 15, h: 15 });
+    var n = 0;
+    for (var i = 0; i < 4; i++) {
+      if (!lv[i]) continue;
+      lay.btns.push({
+        kind: 'slot', i: i, x: INVP_X + 4 + n * 18, y: top + 26, w: 16, h: 16
+      });
+      n += 1;
     }
     return lay;
   }
 
+  function layout() {
+    if (panel === PANEL_DEAD) return deadLayout();
+    if (panel === PANEL_SHOP) return shopLayout();
+    if (panel === PANEL_INV) return invLayout();
+    return { btns: [] };
+  }
+
   function hitButton(gx, gy) {
-    var btns = endLayout().btns;
+    var btns = layout().btns;
     for (var i = 0; i < btns.length; i++) {
       var b = btns[i];
-      if (gx >= b.x && gx <= b.x + b.w && gy >= b.y && gy <= b.y + BTN_H) return i;
+      if (gx >= b.x && gx <= b.x + b.w && gy >= b.y && gy <= b.y + b.h) return i;
     }
     return -1;
   }
 
-  function drawEndCard() {
-    var lay = endLayout(), lines = endLines();
+  // ------------------------------------------------------------- panel paint
+
+  function frame(lay) {
+    P.rectfill(lay.x, lay.y, lay.x + lay.w, lay.y + lay.h, 0);
+    P.rect(lay.x, lay.y, lay.x + lay.w, lay.y + lay.h, 7);
+  }
+
+  function sprAt(sp, cx, cy) {
+    P.spr(sp, cx - flr(sprW(sp) / 2), cy - flr(sprH(sp) / 2));
+  }
+
+  function drawPanel() {
+    if (panel === PANEL_DEAD) drawDead();
+    else if (panel === PANEL_SHOP) drawShop();
+    else if (panel === PANEL_INV) drawInv();
+  }
+
+  function drawDead() {
+    var lay = deadLayout(), lines = endLines();
     P.rectfill(lay.x, lay.y, lay.x + lay.w, lay.y + CARD_H, 0);
     P.rect(lay.x, lay.y, lay.x + lay.w, lay.y + CARD_H, 7);
     for (var i = 0; i < lines.length; i++)
       P.print(lines[i], lay.x + 6, lay.y + 7 + i * 8, 7);
+    drawButtons(lay);
+  }
 
-    // Grey until the pointer is on one, then the game's own red.
+  function drawShop() {
+    var lay = shopLayout(), top = lay.y;
+    frame(lay);
+    P.print('shop', lay.x + 4, top + 5, 7);
+
+    for (var i = 0; i < offers.length; i++) {
+      var o = offers[i], b = lay.btns[i + 1];
+      var c = bank < o.cost ? 5 : (hoverBtn === i + 1 ? RED : GREY);
+      P.rect(b.x, b.y, b.x + b.w, b.y + b.h, c);
+      sprAt(SPR_CARD[o.id], b.x + flr(b.w / 2), b.y + 11);
+      var nm = CARD_NAME[o.id];
+      P.print(nm, b.x + flr((b.w + 1 - textW(nm)) / 2), b.y + 24, 7);
+      var l = 'lv ' + (lv[o.id] + 1);
+      P.print(l, b.x + flr((b.w + 1 - textW(l)) / 2), b.y + 32, GREY);
+      var pr = '' + o.cost;
+      P.print(pr, b.x + flr((b.w + 1 - textW(pr)) / 2), b.y + 39, bank < o.cost ? 5 : GOLD);
+    }
+
+    // Whatever the pointer is on gets explained; otherwise say what the rules are.
+    var hv = hoverBtn > 0 && hoverBtn <= offers.length ? offers[hoverBtn - 1].id : -1;
+    var say = hv >= 0 ? CARD_DESC[hv]
+            : offers.length ? ['one card per death.', 'hover a card to read it']
+                            : ['nothing left to sell.', 'come back next run'];
+    for (var j = 0; j < say.length; j++)
+      P.print(say[j], lay.x + 4, top + 70 + j * 8, hv >= 0 ? 7 : GREY);
+
+    drawButtons(lay);
+  }
+
+  function drawInv() {
+    var lay = invLayout(), top = lay.y;
+    frame(lay);
+    P.print('inventory', lay.x + 4, top + 5, 7);
+
+    var have = 0;
+    for (var i = 0; i < 4; i++) if (lv[i]) have += 1;
+    var cnt = have + '/4';
+    P.print(cnt, lay.x + lay.w - 21 - textW(cnt), top + 5, GREY);
+
+    P.rect(lay.x + 3, top + 19, lay.x + 79, top + 63, GREY);
+    P.rect(lay.x + 83, top + 19, lay.x + lay.w - 3, top + 63, GREY);
+
+    if (picked < 0) {
+      P.print('empty', lay.x + 8, top + 30, 5);
+    } else {
+      sprAt(SPR_CARD[picked], lay.x + 100, top + 30);
+      var l = 'lv ' + lv[picked] + '/' + MAX_LV;
+      P.print(l, lay.x + 100 - flr(textW(l) / 2), top + 48, 7);
+      var d = CARD_DESC[picked];
+      for (var j = 0; j < d.length; j++)
+        P.print(d[j], lay.x + 4, top + 68 + j * 8, 7);
+    }
+
+    drawButtons(lay);
+  }
+
+  // Grey until the pointer is on one, then the game's own red.
+  function drawButtons(lay) {
     for (var i = 0; i < lay.btns.length; i++) {
-      var b = lay.btns[i], c = i === hoverBtn ? RED : GREY;
-      P.rectfill(b.x, b.y, b.x + b.w, b.y + BTN_H, 0);
-      P.rect(b.x, b.y, b.x + b.w, b.y + BTN_H, c);
-      P.print(b.label, b.x + flr((b.w + 1 - textW(b.label)) / 2), b.y + 3, c);
+      var b = lay.btns[i], c = b.dim ? 5 : (i === hoverBtn ? RED : GREY);
+      if (b.kind === 'back') {
+        P.spr(SPR_RETURN, b.x, b.y, GREY, i === hoverBtn ? RED : GREY);
+      } else if (b.kind === 'slot') {
+        P.rect(b.x, b.y, b.x + b.w, b.y + b.h, b.i === picked ? 7 : c);
+        sprAt(SPR_CARD[b.i], b.x + 8, b.y + 8);
+      } else if (b.kind === 'buy') {
+        /* drawn with its card, above */
+      } else if (b.label) {
+        P.rectfill(b.x, b.y, b.x + b.w, b.y + b.h, 0);
+        P.rect(b.x, b.y, b.x + b.w, b.y + b.h, c);
+        P.print(b.label, b.x + flr((b.w + 1 - textW(b.label)) / 2), b.y + 3, c);
+      } else {
+        P.rectfill(b.x, b.y, b.x + b.w, b.y + b.h, 5);
+        P.rect(b.x, b.y, b.x + b.w, b.y + b.h, c);
+        P.spr(SPR_BAG, b.x + 1, b.y + 1);
+      }
+      // Overhangs the top-right corner far enough to read as pinned on, not so
+      // far that it bites the card above or falls off the top of the screen.
+      if (b.badge) {
+        if (b.small) P.spr(SPR_BANG_S, b.x + b.w + 1, b.y - 4);
+        else P.spr(SPR_BANG, b.x + b.w - 3, b.y - 3);
+      }
     }
   }
 
@@ -490,13 +1105,22 @@
   function boot() {
     var canvas = document.getElementById('screen');
     var screen = P.Screen(canvas);
-    canvasEl = canvas;
     load();
     reset();
     playing = false;
 
     // ---- keyboard
     global.addEventListener('keydown', function (ev) {
+      // Letters go into the code buffer first: most of them are not bound to
+      // anything, so the handler below would have returned before seeing them.
+      if (!playing && !ending && ev.key && ev.key.length === 1) {
+        typed = (typed + ev.key.toLowerCase()).slice(-CODE.length);
+        if (typed === CODE && !rainbow) {
+          rainbow = true;
+          codeShown = 180;
+          sfx(SFX.kill200);
+        }
+      }
       if (ev.code === 'KeyM') { setMuted(audio.toggleMute()); return; }
       var b = KEYS[ev.code];
       if (b === undefined) return;

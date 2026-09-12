@@ -1,0 +1,19 @@
+# Nothing here is loaded at runtime, and the first two must never be public.
+
+# Provenance research for the original cart. Kept local on purpose.
+archive/
+
+# Working notes.
+CLAUDE.md
+DESIGN.md
+
+# Source art. Every sprite is traced into src/game.js by hand, so the
+# originals are 5MB of dead weight in a deployment.
+assest/
+
+.DS_Store
+.git
+
+# vercel link drops an OIDC token in here. Never ship it.
+.env*
+.vercel
