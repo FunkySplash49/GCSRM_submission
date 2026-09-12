@@ -46,6 +46,9 @@ The wallet sits up there the whole time, grey while you're playing and gold once
 you're dead. It's saved to the browser along with your high score and whatever
 cards you own, so it's still there tomorrow.
 
+Going to the shop counts the earnings across first, the same way play again does,
+so what you made this run is yours to spend the moment you get there.
+
 ## The shop
 
 Next to play again. It offers one to three cards a death, each rolled

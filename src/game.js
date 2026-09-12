@@ -63,6 +63,7 @@
   var ending, panel = PANEL_NONE, panelNext, phase, panelY, panelVy, panelW;
   var cashAcc, cashStep, spendLeft;
 
+  var cashThen;         // which panel the cash counter hands over to
   var offers = [];      // what the shop is showing, and for how much
   var picked = -1;      // which inventory slot is selected
   var bought = false;   // one card per death, and this is the death you bought on
@@ -322,17 +323,21 @@
   }
 
   // Pay out over roughly half a second however big the haul, with a floor so a
-  // three-coin run is still long enough to read.
-  function startCashout() {
+  // three-coin run is still long enough to read. The run's cash has to reach the
+  // wallet before anything else happens, or you walk into the shop unable to
+  // spend what you just earned, so `then` says where the counter hands over:
+  // out to a fresh run, or on to the shop.
+  function startCashout(then) {
+    cashThen = then;
     phase = PH_CASHOUT;
     cashAcc = 0;
     cashStep = max(0.34, cash / 30);
-    if (cash <= 0) launchCard();
+    if (cash <= 0) endCashout();        // nothing to count, so don't sit on it
   }
 
-  function launchCard() {
+  function endCashout() {
     save();
-    leavePanel(PANEL_NONE);
+    leavePanel(cashThen);
   }
 
   // One frame of whichever panel is up, wherever it is in its life.
@@ -348,7 +353,7 @@
     } else if (phase === PH_WAIT) {
       hoverBtn = mouseIn ? hitButton(mouseX, mouseY) : -1;
       if (clickWanted && hoverBtn >= 0) activate(layout().btns[hoverBtn]);
-      if (btnp(4) && panel === PANEL_DEAD) startCashout();
+      if (btnp(4) && panel === PANEL_DEAD) startCashout(PANEL_NONE);
 
     } else if (phase === PH_CASHOUT) {
       // Drain the card into the wallet a coin at a time. Both counters stay
@@ -360,7 +365,7 @@
         bank += 1;
         if (cash % 2 === 0) sfx(SFX.coin);
       }
-      if (cash <= 0) launchCard();
+      if (cash <= 0) endCashout();
 
     } else if (phase === PH_SPEND) {
       // The same counter running the other way: the price comes out of the
@@ -390,8 +395,8 @@
   // panels can lay themselves out however they like.
   function activate(b) {
     if (b.dim) return;
-    if (b.kind === 'again') startCashout();
-    else if (b.kind === 'shop') { shopSeen = true; save(); leavePanel(PANEL_SHOP); }
+    if (b.kind === 'again') startCashout(PANEL_NONE);
+    else if (b.kind === 'shop') { shopSeen = true; save(); startCashout(PANEL_SHOP); }
     else if (b.kind === 'bag') { invNew = false; save(); leavePanel(PANEL_INV); }
     else if (b.kind === 'back') leavePanel(PANEL_DEAD);
     else if (b.kind === 'buy') buy(offers[b.i]);
