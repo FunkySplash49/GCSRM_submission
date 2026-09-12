@@ -75,7 +75,13 @@ exclamation mark when there's something in it you haven't looked at.
 | arrows or WASD | move |
 | Z | start a run, and fire a burst once the bar is full |
 | M | mute |
+| F | fullscreen, or the button under the screen |
 | mouse | every button: play again, shop, the bag, return, and the cards |
+
+Fullscreen picks the largest whole number of device pixels per game pixel that
+fits, so 128 pixels across stays 128 sharp squares instead of a mix of two widths.
+On a 900-tall display that works out at 13 device pixels each, and the few left
+over become black margin.
 
 The pointer is drawn in the game's own pixels, so it changes with the screen
 rather than sitting on top of it.

@@ -98,6 +98,7 @@ body {
   align-items: center;
   gap: 12px;
 }
+.bar #full { grid-column: 1; justify-self: start; }
 .bar #hint { grid-column: 2; justify-self: center; }
 .bar #mute { grid-column: 3; justify-self: end; }
 
@@ -109,7 +110,7 @@ body {
   opacity: .85;
 }
 
-#mute {
+#mute, #full {
   flex: none;
   white-space: nowrap;
   padding: 5px 10px;
@@ -122,8 +123,38 @@ body {
   cursor: pointer;
   transition: color .15s, border-color .15s;
 }
-#mute:hover { color: var(--ink); border-color: #3a3352; }
+#mute:hover, #full:hover { color: var(--ink); border-color: #3a3352; }
 #mute[aria-pressed="true"] { color: #3a3352; }
+#full[hidden] { display: none; }
+
+/* Fullscreen hands the bezel the whole display, so it drops the cabinet styling
+   and becomes a plain black surround. The canvas size itself is set inline by
+   game.js, which picks a whole-pixel scale; these are the fallback if it can't. */
+.bezel:fullscreen {
+  padding: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+.bezel:fullscreen #screen { width: 100vmin; height: 100vmin; border-radius: 0; }
+.bezel:fullscreen .scanlines { inset: 0; border-radius: 0; }
+
+.bezel:-webkit-full-screen {
+  padding: 0;
+  border-radius: 0;
+  background: #000;
+  box-shadow: none;
+  width: 100vw;
+  height: 100vh;
+  display: grid;
+  place-items: center;
+}
+.bezel:-webkit-full-screen #screen { width: 100vmin; height: 100vmin; border-radius: 0; }
+.bezel:-webkit-full-screen .scanlines { inset: 0; border-radius: 0; }
 
 .notes {
   width: min(78vmin, 512px);

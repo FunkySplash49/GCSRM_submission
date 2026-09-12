@@ -1122,6 +1122,7 @@
         }
       }
       if (ev.code === 'KeyM') { setMuted(audio.toggleMute()); return; }
+      if (ev.code === 'KeyF') { toggleFullscreen(); return; }
       var b = KEYS[ev.code];
       if (b === undefined) return;
       ev.preventDefault();
@@ -1187,6 +1188,56 @@
       clickWanted = true;
       audio.unlock();
     });
+
+    // ---- fullscreen. A 128px canvas is nothing until CSS scales it, so going
+    // fullscreen means choosing the size by hand: the largest whole number of
+    // device pixels per game pixel that still fits. A fractional scale leaves
+    // `image-rendering: pixelated` drawing some rows a pixel taller than others,
+    // which is very visible on a grid this coarse.
+    var bezel = canvas.parentNode || canvas;
+    var fullBtn = document.getElementById('full');
+
+    function fsNow() {
+      return document.fullscreenElement || document.webkitFullscreenElement || null;
+    }
+
+    function fitFullscreen() {
+      if (fsNow() !== bezel) { canvas.style.width = ''; canvas.style.height = ''; return; }
+      var dpr = global.devicePixelRatio || 1;
+      var room = Math.min(global.innerWidth, global.innerHeight) * dpr;
+      var scale = Math.max(1, flr(room / 128)) / dpr;
+      canvas.style.width = canvas.style.height = (128 * scale) + 'px';
+    }
+
+    function toggleFullscreen() {
+      if (fsNow()) {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document);
+        return;
+      }
+      var req = bezel.requestFullscreen || bezel.webkitRequestFullscreen;
+      // Rejects if the browser doesn't count this as a gesture. Nothing to do
+      // about that, but an unhandled rejection in the console is noise.
+      if (req) { var p = req.call(bezel); if (p && p.catch) p.catch(function () {}); }
+    }
+
+    function onFsChange() {
+      fitFullscreen();
+      if (!fullBtn) return;
+      var on = fsNow() === bezel;
+      fullBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+      fullBtn.textContent = on ? 'exit fullscreen' : 'fullscreen';
+    }
+
+    // Guarded: a stale cached index.html without the button would otherwise
+    // throw here and take the whole game down with it, blank screen and all.
+    if (fullBtn) {
+      if (!(bezel.requestFullscreen || bezel.webkitRequestFullscreen)) fullBtn.hidden = true;
+      fullBtn.addEventListener('click', toggleFullscreen);
+      document.addEventListener('fullscreenchange', onFsChange);
+      document.addEventListener('webkitfullscreenchange', onFsChange);
+      global.addEventListener('resize', fitFullscreen);
+    }
 
     // ---- mute button
     var muteBtn = document.getElementById('mute');
